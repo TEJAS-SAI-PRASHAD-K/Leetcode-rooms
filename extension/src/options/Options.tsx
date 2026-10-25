@@ -266,8 +266,14 @@ export function Options() {
       )}
 
       {/* ---------------- Create / join ---------------- */}
-      <section className="grid gap-4 sm:grid-cols-2">
-        <div className="space-y-2">
+      {/*
+        items-stretch + a column flex with mt-auto on the button keeps the two
+        calls to action on the same baseline. Previously each column was its own
+        height, so the differing helper-text length pushed the buttons out of
+        line with each other.
+      */}
+      <section className="grid items-stretch gap-4 sm:grid-cols-2">
+        <div className="flex flex-col gap-2">
           <h3 className="text-[13px] font-semibold">Create a room</h3>
           <input
             value={newRoom}
@@ -275,7 +281,7 @@ export function Options() {
             placeholder="Room name"
             className="w-full rounded bg-neutral-900 px-2.5 py-1.5 text-[13px] outline-none ring-1 ring-neutral-800 focus:ring-brand/60"
           />
-          <p className="text-[11px] text-neutral-500">
+          <p className="text-[11px] leading-relaxed text-neutral-500">
             Day boundaries and the weekly reset will use your timezone ({tz}).
           </p>
           <button
@@ -288,13 +294,13 @@ export function Options() {
                 return `Created "${room.name}". Share code ${room.code} with your friends.`;
               })
             }
-            className="w-full rounded bg-brand py-1.5 text-[13px] font-medium text-neutral-950 hover:bg-brand-dim disabled:opacity-40"
+            className="mt-auto w-full rounded bg-brand py-1.5 text-[13px] font-medium text-neutral-950 hover:bg-brand-dim disabled:bg-neutral-800 disabled:text-neutral-400"
           >
             Create room
           </button>
         </div>
 
-        <div className="space-y-2">
+        <div className="flex flex-col gap-2">
           <h3 className="text-[13px] font-semibold">Join a room</h3>
           <input
             value={joinCode}
@@ -303,7 +309,7 @@ export function Options() {
             maxLength={6}
             className="w-full rounded bg-neutral-900 px-2.5 py-1.5 font-mono text-[13px] tracking-widest outline-none ring-1 ring-neutral-800 focus:ring-brand/60"
           />
-          <p className="text-[11px] text-neutral-500">
+          <p className="text-[11px] leading-relaxed text-neutral-500">
             Ask whoever made the room for its code.
           </p>
           <button
@@ -316,12 +322,13 @@ export function Options() {
                 return `Joined "${room.name}".`;
               })
             }
-            className="w-full rounded bg-brand py-1.5 text-[13px] font-medium text-neutral-950 hover:bg-brand-dim disabled:opacity-40"
+            className="mt-auto w-full rounded bg-brand py-1.5 text-[13px] font-medium text-neutral-950 hover:bg-brand-dim disabled:bg-neutral-800 disabled:text-neutral-400"
           >
             Join room
           </button>
         </div>
       </section>
+
       <footer className="border-t border-neutral-800 pt-3 text-[11px] text-neutral-600">
         Extension build {__BUILD_ID__}
         {bgBuild !== undefined && (
