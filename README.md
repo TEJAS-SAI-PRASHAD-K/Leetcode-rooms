@@ -11,12 +11,23 @@ resets every Monday, difficulty-weighted points, and a +1 nudge for solving firs
 ## How it works
 
 1. One person creates a room and shares its 6-character code.
-2. Each day the rotation picks a **curator**, who chooses the problem.
-   If they miss the deadline, the server picks automatically — a busy curator
-   can never kill the room's day.
-3. Everyone solves it on leetcode.com as normal.
+2. Each day the rotation picks a **curator**, who chooses the day's problem or
+   set of problems. If they miss the deadline, the server picks automatically —
+   a busy curator can never kill the room's day.
+3. Everyone solves them on leetcode.com as normal.
 4. The server verifies each solve from LeetCode's public submission feed and
    updates points, streaks and the leaderboard.
+
+### Room modes
+
+A room holds **1–5 problems per round** and decides how the set is scored:
+
+| Mode | Window | Ranked by |
+|---|---|---|
+| **Daily completion** | the room's local day | weekly points, then streak. A day counts toward your streak once the *whole* set is solved; partial progress still earns points. |
+| **Time trial** | starts when the set is picked, runs for the room's trial length | problems solved, then who finished first. Solves outside the window do not count. |
+
+Both are per-room settings the owner can change at any time.
 
 Nobody self-reports anything. The extension asks the server to *check*; the
 server confirms against LeetCode. That keeps the leaderboard honest even though
@@ -44,11 +55,11 @@ can tune or silence them without a code change.
 
 ## Scoring
 
-- **Points:** Easy 1, Medium 3, Hard 5, plus **+1** for solving first.
-  The bonus is small on purpose: a Medium solved last still beats an Easy
-  solved first.
-- **Streak:** consecutive rounds solved. An unsolved *today* does not break it —
-  the day is not over.
+- **Points:** Easy 1, Medium 3, Hard 5, plus **+1** for being first to solve
+  that problem. The bonus is small on purpose: a Medium solved last still beats
+  an Easy solved first.
+- **Streak:** consecutive rounds *completed* — every problem in the set solved.
+  An unfinished *today* does not break it; the day is not over.
 - **Weekly leaderboard** resets Monday in the room's timezone, so one strong
   week never permanently decides the standings.
 - **The curator is scored normally.** Because ranking is by completion and
@@ -61,8 +72,21 @@ can tune or silence them without a code change.
 extension/   Chrome MV3 extension — popup, options, content script, service worker
 worker/      Cloudflare Worker + D1 — rooms, rounds, scoring, verification cron
 shared/      API contract types shared by both sides
-scripts/     check-leetcode-api.ts — contract test against LeetCode's live API
+scripts/     check-leetcode-api.ts   — contract test against LeetCode's live API
+             build-catalog-sql.ts    — generate a seedable catalog dump
+             bump-version.mjs        — bump the version across all packages
 ```
+
+## Versioning
+
+The version lives in `package.json` and is read from there by the extension
+manifest, so it can never drift:
+
+```bash
+npm run bump patch   # or minor / major
+```
+
+See [CHANGELOG.md](CHANGELOG.md) for what changed in each release.
 
 ## Setup
 
