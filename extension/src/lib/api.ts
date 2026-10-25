@@ -5,6 +5,7 @@ import type {
   PickResponse,
   RegisterResponse,
   Room,
+  RoomSettings,
   RoomStateResponse,
   VerifyHandleResponse,
   VerifyNowResponse,
@@ -128,14 +129,32 @@ export const api = {
   state: (roomId: string) =>
     request<RoomStateResponse>(`/api/rooms/${roomId}/state`),
 
-  browse: (roomId: string, opts: { query?: string; difficulty?: Difficulty[]; cursor?: number } = {}) => {
+  browse: (
+    roomId: string,
+    opts: {
+      query?: string;
+      difficulty?: Difficulty[];
+      tags?: string[];
+      /** Already chosen for this set, so the server can block duplicates. */
+      selected?: string[];
+      cursor?: number;
+    } = {},
+  ) => {
     const p = new URLSearchParams();
     if (opts.query) p.set("query", opts.query);
     if (opts.difficulty?.length) p.set("difficulty", opts.difficulty.join(","));
+    if (opts.tags?.length) p.set("tags", opts.tags.join(","));
+    if (opts.selected?.length) p.set("selected", opts.selected.join(","));
     if (opts.cursor) p.set("cursor", String(opts.cursor));
     p.set("limit", "40");
     return request<BrowseProblemsResponse>(`/api/rooms/${roomId}/problems?${p}`);
   },
+
+  updateSettings: (roomId: string, settings: Partial<RoomSettings>) =>
+    request<{ room: Room }>(`/api/rooms/${roomId}/settings`, {
+      method: "PATCH",
+      body: JSON.stringify(settings),
+    }),
 
   pick: (roomId: string, body: PickRequest) =>
     request<PickResponse>(`/api/rooms/${roomId}/pick`, {

@@ -1,7 +1,9 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { api } from "../lib/api.js";
 import { detectAndLink } from "../lib/link.js";
+import { RoomSettings } from "./RoomSettings.js";
 import { readStore, writeStore } from "../lib/storage.js";
+import type { Room } from "@lcr/shared";
 import { Banner, Spinner } from "../popup/components.js";
 
 interface RoomRow {
@@ -21,6 +23,8 @@ export function Options() {
   >();
   const [detecting, setDetecting] = useState(false);
   const [bgBuild, setBgBuild] = useState<string | null | undefined>();
+  const [activeRoom, setActiveRoom] = useState<Room | null>(null);
+  const [meId, setMeId] = useState<string | undefined>();
   const [newRoom, setNewRoom] = useState("");
   const [joinCode, setJoinCode] = useState("");
   const [busy, setBusy] = useState(false);
@@ -37,6 +41,16 @@ export function Options() {
       setHandle(me.user.leetcodeUsername);
       setLastDetect(store.lastDetect);
       setRooms(list.rooms);
+      setMeId(me.user.id);
+
+      // Full settings for the active room, so the settings panel can render.
+      const activeId = store.activeRoomId ?? list.rooms[0]?.id;
+      if (activeId) {
+        const state = await api.state(activeId).catch(() => null);
+        setActiveRoom(state?.room ?? null);
+      } else {
+        setActiveRoom(null);
+      }
 
       // Ask the service worker which build it is running. A mismatch is the
       // usual explanation for messages going unanswered after an update.
@@ -233,6 +247,23 @@ export function Options() {
           </ul>
         )}
       </section>
+
+      {/* ---------------- Room settings ---------------- */}
+      {activeRoom && (
+        <section className="space-y-2">
+          <h2 className="text-[13px] font-semibold uppercase tracking-wide text-neutral-400">
+            Settings for "{activeRoom.name}"
+          </h2>
+          <RoomSettings
+            room={activeRoom}
+            isOwner={activeRoom.ownerId === meId}
+            onSaved={(m) => {
+              setMsg({ tone: "good", text: m });
+              void load();
+            }}
+          />
+        </section>
+      )}
 
       {/* ---------------- Create / join ---------------- */}
       <section className="grid gap-4 sm:grid-cols-2">

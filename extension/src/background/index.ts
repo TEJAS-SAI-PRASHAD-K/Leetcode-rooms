@@ -74,24 +74,29 @@ async function onHandleDetected(result: DetectResult) {
 }
 
 
-/** Ask the server to verify, if the submitted problem is today's problem. */
+/** Ask the server to verify, if the submitted problem is part of today's set. */
 async function onSubmission(slug: string) {
   const store = await readStore();
   if (!store.activeRoomId) return { ok: true, skipped: "no room" };
 
   const state = await api.state(store.activeRoomId).catch(() => null);
-  if (!state?.today?.problemSlug) return { ok: true, skipped: "no problem" };
-  if (state.today.problemSlug !== slug) return { ok: true, skipped: "other problem" };
+  const problems = state?.today?.problems ?? [];
+  if (problems.length === 0) return { ok: true, skipped: "no problems" };
+
+  const match = problems.find((p) => p.slug === slug);
+  if (!match) return { ok: true, skipped: "not in today's set" };
 
   const result = await api.verifyNow(store.activeRoomId).catch(() => null);
-  if (result?.solved) {
+  if (result && result.newSolves.length > 0) {
     await notify(
-      "Solved — nice one",
-      `${state.today.problemTitle} counted for ${state.room.name}.`,
+      result.completed ? "Set complete — nice one" : "Solved — nice one",
+      result.completed
+        ? `You finished today's set in ${state!.room.name}.`
+        : `${match.title} counted. ${result.solves.length} of ${problems.length} done.`,
     );
     await refreshBadge();
   }
-  return { ok: true, solved: result?.solved ?? false };
+  return { ok: true, solved: (result?.newSolves.length ?? 0) > 0 };
 }
 
 /**
@@ -114,12 +119,20 @@ async function refreshBadge() {
 
   const me = state.leaderboard.find((e) => e.userId === store.identity?.userId);
 
-  if (!state.today?.problemSlug) {
+  if ((state.today?.problems.length ?? 0) === 0) {
     // Waiting on a pick. Flag it specifically when it is this user's turn.
     await setBadge(state.isMyTurn ? "!" : "", state.isMyTurn ? "#ffa116" : "#6b7280");
     return;
   }
-  await setBadge(me?.solvedToday ? "" : "•", me?.solvedToday ? "#00b8a3" : "#ff375f");
+
+  if (me?.completedToday) {
+    await setBadge("", "#00b8a3");
+    return;
+  }
+  // Show how much of the set is left rather than a bare dot: "2" is a more
+  // actionable nudge than "something is outstanding".
+  const remaining = (me?.problemsToday ?? 0) - (me?.solvedToday ?? 0);
+  await setBadge(remaining > 0 ? String(remaining) : "•", "#ff375f");
 }
 
 async function setBadge(text: string, color: string) {

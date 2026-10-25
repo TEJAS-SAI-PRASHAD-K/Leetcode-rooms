@@ -47,3 +47,34 @@ export const RECENT_AC_LIMIT = 20;
 
 /** Workers Free allows 50 subrequests per invocation. Stay clear of the ceiling. */
 export const MAX_CHECKS_PER_CRON_RUN = 40;
+
+/**
+ * Quick topic filters for the picker, ordered by how many free problems carry
+ * each tag in LeetCode's catalog, so the first row is the one people reach for.
+ * Counts were measured against the live catalog (3,308 non-premium problems)
+ * rather than guessed.
+ */
+export const QUICK_TOPICS: ReadonlyArray<{ slug: string; label: string }> = [
+  { slug: "array", label: "Arrays" },
+  { slug: "string", label: "Strings" },
+  { slug: "hash-table", label: "Hash Table" },
+  { slug: "dynamic-programming", label: "DP" },
+  { slug: "math", label: "Math" },
+  { slug: "sorting", label: "Sorting" },
+  { slug: "greedy", label: "Greedy" },
+  { slug: "binary-search", label: "Binary Search" },
+  { slug: "two-pointers", label: "Two Pointers" },
+  { slug: "sliding-window", label: "Sliding Window" },
+  { slug: "tree", label: "Trees" },
+  { slug: "graph", label: "Graphs" },
+  { slug: "depth-first-search", label: "DFS" },
+  { slug: "breadth-first-search", label: "BFS" },
+  { slug: "stack", label: "Stack" },
+  { slug: "heap-priority-queue", label: "Heap" },
+  { slug: "matrix", label: "Matrix" },
+  { slug: "bit-manipulation", label: "Bit Manipulation" },
+  { slug: "prefix-sum", label: "Prefix Sum" },
+  { slug: "linked-list", label: "Linked List" },
+  { slug: "backtracking", label: "Backtracking" },
+  { slug: "design", label: "Design" },
+];
