@@ -17,7 +17,8 @@
     "typecheck": "tsc -b shared worker extension",
     "check:api": "node --experimental-strip-types scripts/check-leetcode-api.ts",
     "build:catalog": "node --experimental-strip-types scripts/build-catalog-sql.ts",
-    "bump": "node scripts/bump-version.mjs"
+    "bump": "node scripts/bump-version.mjs",
+    "package": "node scripts/package-extension.mjs"
   },
   "devDependencies": {
     "typescript": "^5.6.3",

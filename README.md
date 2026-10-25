@@ -8,6 +8,31 @@ Built for **practice first** — scoring rewards turning up and stretching, not
 racing. The competitive edge is deliberately light: a weekly leaderboard that
 resets every Monday, difficulty-weighted points, and a +1 nudge for solving first.
 
+## Install
+
+Download **[releases/leetcode-rooms-v0.3.1.zip](releases/leetcode-rooms-v0.3.1.zip)**, then:
+
+1. Unzip it. You should end up with a folder containing `manifest.json`.
+2. Open `chrome://extensions` and turn on **Developer mode** (top right).
+3. Click **Load unpacked** and select the unzipped folder.
+4. Open [leetcode.com](https://leetcode.com/) while signed in — the extension
+   reads your username from the page and links it automatically. You never type
+   it in, so nobody can claim your handle.
+5. Click the extension icon, then **Create or join a room**. Whoever made the
+   room gives you its 6-character code.
+
+A few things worth knowing:
+
+- **Chrome cannot install a `.zip` or `.crx` directly** outside the Web Store,
+  so "Load unpacked" is the route. Keep the unzipped folder where it is —
+  deleting it uninstalls the extension.
+- **Updating means re-downloading.** Grab the newer zip, replace the folder,
+  and press the reload icon on `chrome://extensions`. Publishing to the Chrome
+  Web Store (a one-time $5 developer account, listed as **Unlisted**) is worth
+  it if you would rather updates arrive on their own.
+- The zip is built against one specific Worker, baked in at build time. If you
+  are running your own server, build your own zip — see below.
+
 ## How it works
 
 1. One person creates a room and shares its 6-character code.
@@ -72,9 +97,11 @@ can tune or silence them without a code change.
 extension/   Chrome MV3 extension — popup, options, content script, service worker
 worker/      Cloudflare Worker + D1 — rooms, rounds, scoring, verification cron
 shared/      API contract types shared by both sides
+releases/    packaged .zip builds, ready to load unpacked
 scripts/     check-leetcode-api.ts   — contract test against LeetCode's live API
              build-catalog-sql.ts    — generate a seedable catalog dump
              bump-version.mjs        — bump the version across all packages
+             package-extension.mjs   — build and zip the extension for sharing
 ```
 
 ## Versioning
@@ -171,12 +198,24 @@ Everything fits comfortably in Cloudflare's free tier: 100k requests/day,
 D1 at 5M rows read and 100k written per day, and 5 cron triggers per account
 (this uses one).
 
+### Packaging a zip to share
+
+```bash
+VITE_API_BASE=https://<your-worker>.workers.dev npm run package
+```
+
+This writes `releases/leetcode-rooms-v<version>.zip` with your Worker's URL
+baked into both the bundle and `host_permissions`. It refuses to build without
+that variable, or with a localhost one: a zip pointing at `127.0.0.1` installs
+fine and then fails for everyone, which is the kind of mistake you only find out
+about from someone else.
+
 ### Sharing with friends
 
 A Chrome Web Store developer account is a **one-time $5**; publish **Unlisted**
 so only people with the link can install, and updates reach everyone
-automatically. The free alternative is each friend using *Load unpacked*, but
-they would have to reload the folder manually on every update.
+automatically. The zip above is the free alternative, but each friend has to
+reload the folder manually whenever you ship a change.
 
 ## Testing
 
