@@ -6,7 +6,7 @@ import {
   evaluatePick,
   humanizeTag,
   unacknowledgedWarnings,
-  type PastRound,
+  type PastPick,
 } from "../src/repeats.js";
 
 const SETTINGS = {
@@ -31,7 +31,7 @@ function problem(over: Partial<Problem> = {}): Problem {
   };
 }
 
-function round(over: Partial<PastRound> = {}): PastRound {
+function round(over: Partial<PastPick> = {}): PastPick {
   return {
     roundDate: "2026-10-24",
     problemSlug: "valid-parentheses",
@@ -79,7 +79,7 @@ describe("evaluatePick — exact repeat cooldown", () => {
     const v = evaluatePick({
       settings: SETTINGS,
       candidate: problem(),
-      pastRounds: [round({ problemSlug: "two-sum", roundDate: daysAgo(12) })],
+      pastPicks: [round({ problemSlug: "two-sum", roundDate: daysAgo(12) })],
       today: TODAY,
     });
 
@@ -97,7 +97,7 @@ describe("evaluatePick — exact repeat cooldown", () => {
     const at29 = evaluatePick({
       settings: SETTINGS,
       candidate: problem(),
-      pastRounds: [round({ problemSlug: "two-sum", roundDate: daysAgo(29) })],
+      pastPicks: [round({ problemSlug: "two-sum", roundDate: daysAgo(29) })],
       today: TODAY,
     });
     expect(at29.blocked?.code).toBe("repeat_recent");
@@ -105,7 +105,7 @@ describe("evaluatePick — exact repeat cooldown", () => {
     const at31 = evaluatePick({
       settings: SETTINGS,
       candidate: problem(),
-      pastRounds: [round({ problemSlug: "two-sum", roundDate: daysAgo(31) })],
+      pastPicks: [round({ problemSlug: "two-sum", roundDate: daysAgo(31) })],
       today: TODAY,
     });
     expect(at31.blocked).toBeNull();
@@ -116,7 +116,7 @@ describe("evaluatePick — exact repeat cooldown", () => {
     const at30 = evaluatePick({
       settings: SETTINGS,
       candidate: problem(),
-      pastRounds: [round({ problemSlug: "two-sum", roundDate: daysAgo(30) })],
+      pastPicks: [round({ problemSlug: "two-sum", roundDate: daysAgo(30) })],
       today: TODAY,
     });
     expect(at30.blocked).toBeNull();
@@ -127,7 +127,7 @@ describe("evaluatePick — exact repeat cooldown", () => {
     const v = evaluatePick({
       settings: SETTINGS,
       candidate: problem(),
-      pastRounds: [
+      pastPicks: [
         round({ problemSlug: "two-sum", roundDate: daysAgo(5), curatorName: "Ana" }),
         round({ problemSlug: "two-sum", roundDate: daysAgo(200), curatorName: "Old" }),
       ],
@@ -141,7 +141,7 @@ describe("evaluatePick — exact repeat cooldown", () => {
     const v = evaluatePick({
       settings: SETTINGS,
       candidate: problem(),
-      pastRounds: [round(), round({ roundDate: daysAgo(2) })],
+      pastPicks: [round(), round({ roundDate: daysAgo(2) })],
       today: TODAY,
     });
     expect(v.blocked).toBeNull();
@@ -152,7 +152,7 @@ describe("evaluatePick — exact repeat cooldown", () => {
     const v = evaluatePick({
       settings: { ...SETTINGS, repeatCooldownDays: 7 },
       candidate: problem(),
-      pastRounds: [round({ problemSlug: "two-sum", roundDate: daysAgo(10) })],
+      pastPicks: [round({ problemSlug: "two-sum", roundDate: daysAgo(10) })],
       today: TODAY,
     });
     expect(v.blocked).toBeNull();
@@ -164,7 +164,7 @@ describe("evaluatePick — premium", () => {
     const v = evaluatePick({
       settings: SETTINGS,
       candidate: problem({ paidOnly: true }),
-      pastRounds: [],
+      pastPicks: [],
       today: TODAY,
     });
     expect(v.blocked?.code).toBe("paid_only");
@@ -176,7 +176,7 @@ describe("evaluatePick — topic concentration", () => {
     const v = evaluatePick({
       settings: SETTINGS,
       candidate: problem({ slug: "x", topicTags: ["array"] }),
-      pastRounds: [
+      pastPicks: [
         round({ roundDate: daysAgo(1), problemSlug: "a", topicTags: ["array"] }),
         round({ roundDate: daysAgo(2), problemSlug: "b", topicTags: ["array"] }),
         round({ roundDate: daysAgo(3), problemSlug: "c", topicTags: ["array"] }),
@@ -192,7 +192,7 @@ describe("evaluatePick — topic concentration", () => {
     const v = evaluatePick({
       settings: SETTINGS,
       candidate: problem({ slug: "x", topicTags: ["array"] }),
-      pastRounds: [
+      pastPicks: [
         round({ roundDate: daysAgo(1), problemSlug: "a", topicTags: ["array"] }),
         round({ roundDate: daysAgo(2), problemSlug: "b", topicTags: ["stack"] }),
       ],
@@ -211,19 +211,19 @@ describe("evaluatePick — topic concentration", () => {
     const v = evaluatePick({
       settings: SETTINGS,
       candidate: problem({ slug: "x", topicTags: ["array"] }),
-      pastRounds: [...recent, ...old], // newest first; the 4 array rounds fall outside
+      pastPicks: [...recent, ...old], // newest first; the 4 array rounds fall outside
       today: TODAY,
     });
     expect(v.warnings.map((w) => w.code)).not.toContain("topic_concentration");
   });
 });
 
-describe("evaluatePick — difficulty run", () => {
-  it("warns on a run of the same difficulty", () => {
+describe("evaluatePick — difficulty concentration", () => {
+  it("warns when a difficulty dominates the recent window", () => {
     const v = evaluatePick({
       settings: SETTINGS,
       candidate: problem({ slug: "x", difficulty: "Easy" }),
-      pastRounds: [
+      pastPicks: [
         round({ roundDate: daysAgo(1), problemSlug: "a", difficulty: "Easy" }),
         round({ roundDate: daysAgo(2), problemSlug: "b", difficulty: "Easy" }),
         round({ roundDate: daysAgo(3), problemSlug: "c", difficulty: "Easy" }),
@@ -231,18 +231,32 @@ describe("evaluatePick — difficulty run", () => {
       today: TODAY,
     });
     const w = v.warnings.find((w) => w.code === "difficulty_run");
-    expect(w?.message).toContain("4 Easy problems in a row");
+    expect(w?.message).toContain("4th Easy problem");
   });
 
-  it("requires the run to be consecutive and most-recent", () => {
+  it("counts across a round, not just consecutive rounds", () => {
+    // Three Easy problems in ONE round still signals an unbalanced diet.
     const v = evaluatePick({
       settings: SETTINGS,
       candidate: problem({ slug: "x", difficulty: "Easy" }),
-      pastRounds: [
+      pastPicks: [
+        round({ roundDate: daysAgo(1), problemSlug: "a", difficulty: "Easy" }),
+        round({ roundDate: daysAgo(1), problemSlug: "b", difficulty: "Easy" }),
+        round({ roundDate: daysAgo(1), problemSlug: "c", difficulty: "Easy" }),
+      ],
+      today: TODAY,
+    });
+    expect(v.warnings.map((w) => w.code)).toContain("difficulty_run");
+  });
+
+  it("stays quiet below the threshold", () => {
+    const v = evaluatePick({
+      settings: SETTINGS,
+      candidate: problem({ slug: "x", difficulty: "Easy" }),
+      pastPicks: [
         round({ roundDate: daysAgo(1), problemSlug: "a", difficulty: "Hard" }),
         round({ roundDate: daysAgo(2), problemSlug: "b", difficulty: "Easy" }),
         round({ roundDate: daysAgo(3), problemSlug: "c", difficulty: "Easy" }),
-        round({ roundDate: daysAgo(4), problemSlug: "d", difficulty: "Easy" }),
       ],
       today: TODAY,
     });
@@ -251,33 +265,41 @@ describe("evaluatePick — difficulty run", () => {
 });
 
 describe("evaluatePick — per-curator patterns", () => {
-  it("flags one curator defaulting to the same difficulty across their turns", () => {
-    // Interleaved curators: the room-wide run is broken, but u1's own is not.
+  it("catches a curator pattern the room-wide window misses", () => {
+    // u1 picks Easy on each of their turns, but spread far enough apart that
+    // only two fall inside the room's 7-round window — below the threshold.
+    // Scoped to u1's own turns, all three are visible, which is exactly the
+    // rut the per-curator check exists to catch.
+    const picks: PastPick[] = [
+      round({ roundDate: daysAgo(1), problemSlug: "u1a", difficulty: "Easy", curatorId: "u1" }),
+      round({ roundDate: daysAgo(2), problemSlug: "p2", difficulty: "Hard", curatorId: "u2" }),
+      round({ roundDate: daysAgo(3), problemSlug: "p3", difficulty: "Hard", curatorId: "u2" }),
+      round({ roundDate: daysAgo(4), problemSlug: "p4", difficulty: "Hard", curatorId: "u2" }),
+      round({ roundDate: daysAgo(5), problemSlug: "u1b", difficulty: "Easy", curatorId: "u1" }),
+      round({ roundDate: daysAgo(6), problemSlug: "p6", difficulty: "Hard", curatorId: "u2" }),
+      round({ roundDate: daysAgo(7), problemSlug: "p7", difficulty: "Hard", curatorId: "u2" }),
+      round({ roundDate: daysAgo(8), problemSlug: "p8", difficulty: "Hard", curatorId: "u2" }),
+      round({ roundDate: daysAgo(9), problemSlug: "u1c", difficulty: "Easy", curatorId: "u1" }),
+    ];
+
     const v = evaluatePick({
       settings: SETTINGS,
       candidate: problem({ slug: "x", difficulty: "Easy" }),
-      pastRounds: [
-        round({ roundDate: daysAgo(1), problemSlug: "a", difficulty: "Hard", curatorId: "u2" }),
-        round({ roundDate: daysAgo(2), problemSlug: "b", difficulty: "Easy", curatorId: "u1" }),
-        round({ roundDate: daysAgo(3), problemSlug: "c", difficulty: "Hard", curatorId: "u2" }),
-        round({ roundDate: daysAgo(4), problemSlug: "d", difficulty: "Easy", curatorId: "u1" }),
-        round({ roundDate: daysAgo(5), problemSlug: "e", difficulty: "Hard", curatorId: "u2" }),
-        round({ roundDate: daysAgo(6), problemSlug: "f", difficulty: "Easy", curatorId: "u1" }),
-      ],
+      pastPicks: picks,
       today: TODAY,
       curatorId: "u1",
     });
 
     expect(v.warnings.map((w) => w.code)).not.toContain("difficulty_run");
     const w = v.warnings.find((w) => w.code === "curator_difficulty_pattern");
-    expect(w?.message).toContain("last 3 turns");
+    expect(w?.message).toContain("3 of your recent picks");
   });
 
   it("does not flag a curator for other people's picks", () => {
     const v = evaluatePick({
       settings: SETTINGS,
       candidate: problem({ slug: "x", difficulty: "Easy" }),
-      pastRounds: [
+      pastPicks: [
         round({ roundDate: daysAgo(1), problemSlug: "a", difficulty: "Easy", curatorId: "u2" }),
         round({ roundDate: daysAgo(2), problemSlug: "b", difficulty: "Easy", curatorId: "u2" }),
         round({ roundDate: daysAgo(3), problemSlug: "c", difficulty: "Easy", curatorId: "u2" }),
@@ -289,12 +311,40 @@ describe("evaluatePick — per-curator patterns", () => {
   });
 });
 
+describe("evaluatePick — duplicates within one set", () => {
+  it("blocks a problem already chosen for today's set", () => {
+    // The cooldown cannot catch this: the other picks are not saved as past
+    // rounds yet, so without this check a 3-problem set could be one problem
+    // three times.
+    const v = evaluatePick({
+      settings: SETTINGS,
+      candidate: problem(),
+      pastPicks: [],
+      today: TODAY,
+      alreadyInSet: ["two-sum"],
+    });
+    expect(v.blocked?.code).toBe("repeat_recent");
+    expect(v.blocked?.message).toContain("already in today's set");
+  });
+
+  it("allows a different problem for the same set", () => {
+    const v = evaluatePick({
+      settings: SETTINGS,
+      candidate: problem({ slug: "other", title: "Other" }),
+      pastPicks: [],
+      today: TODAY,
+      alreadyInSet: ["two-sum"],
+    });
+    expect(v.blocked).toBeNull();
+  });
+});
+
 describe("unacknowledgedWarnings", () => {
   const oldRepeat = () =>
     evaluatePick({
       settings: SETTINGS,
       candidate: problem(),
-      pastRounds: [round({ problemSlug: "two-sum", roundDate: daysAgo(200) })],
+      pastPicks: [round({ problemSlug: "two-sum", roundDate: daysAgo(200) })],
       today: TODAY,
     });
 
@@ -315,7 +365,7 @@ describe("unacknowledgedWarnings", () => {
     const v = evaluatePick({
       settings: SETTINGS,
       candidate: problem({ slug: "x", difficulty: "Easy" }),
-      pastRounds: [
+      pastPicks: [
         round({ roundDate: daysAgo(1), problemSlug: "a", difficulty: "Easy" }),
         round({ roundDate: daysAgo(2), problemSlug: "b", difficulty: "Easy" }),
         round({ roundDate: daysAgo(3), problemSlug: "c", difficulty: "Easy" }),

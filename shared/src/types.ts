@@ -19,6 +19,19 @@ export type SolveSource =
 
 export type MemberRole = "owner" | "member";
 
+/**
+ * How a round's problem set is scored.
+ *
+ * "daily"      — solve the set any time during the room's local day. A day
+ *                counts toward your streak once you have solved every problem
+ *                in it, which is what makes a multi-problem set a daily goal
+ *                rather than a pile of optional extras.
+ * "time_trial" — the set opens when it is picked and closes after
+ *                timeTrialMinutes. Solves outside that window do not count, and
+ *                members are ranked by how many they finished and how fast.
+ */
+export type RoomMode = "daily" | "time_trial";
+
 export interface Problem {
   slug: string;
   frontendId: string;
@@ -30,6 +43,11 @@ export interface Problem {
 }
 
 export interface RoomSettings {
+  mode: RoomMode;
+  /** How many problems the curator picks for each round. */
+  problemsPerRound: number;
+  /** Length of the window in time_trial mode. Ignored in daily mode. */
+  timeTrialMinutes: number;
   repeatCooldownDays: number;
   topicWarnWindow: number;
   topicWarnThreshold: number;
@@ -60,17 +78,24 @@ export interface Member {
   joinedAt: number;
 }
 
+/** One problem within a round's set. */
+export interface RoundProblem {
+  slug: string;
+  title: string;
+  difficulty: Difficulty;
+  /** Snapshot, so repeat/topic checks stay correct if the catalog is refreshed. */
+  topicTags: string[];
+  position: number;
+}
+
 export interface Round {
   id: string;
   roomId: string;
   /** YYYY-MM-DD in the room's timezone. The room's day boundary, not UTC's. */
   roundDate: string;
   curatorId: string | null;
-  problemSlug: string | null;
-  problemTitle: string | null;
-  difficulty: Difficulty | null;
-  /** Snapshot, so repeat/topic checks stay correct if the catalog is refreshed. */
-  topicTags: string[];
+  /** Empty until the set is picked. */
+  problems: RoundProblem[];
   selectionSource: SelectionSource | null;
   windowStart: number;
   windowEnd: number;
@@ -80,9 +105,10 @@ export interface Round {
 export interface Solve {
   roundId: string;
   userId: string;
+  slug: string;
   solvedAt: number;
   points: number;
-  /** 1 = first to solve this round. Drives the first-solver bonus. */
+  /** Order among solvers of this problem; 1 earns the first-solver bonus. */
   solveOrder: number;
   source: SolveSource;
 }
@@ -134,9 +160,19 @@ export interface LeaderboardEntry {
   totalPoints: number;
   currentStreak: number;
   longestStreak: number;
-  /** Rounds solved out of the last 7. */
+  /** Rounds fully completed out of the last 7. */
   solvedOfLast7: number;
-  solvedToday: boolean;
+  /** Every problem in today's set solved. */
+  completedToday: boolean;
+  /** Problems solved in today's set. */
+  solvedToday: number;
+  /** Size of today's set, so the UI can show "2/3". */
+  problemsToday: number;
+  /**
+   * Timestamp of the last solve that completed today's set, for time-trial
+   * ranking. Null when the set is not finished.
+   */
+  finishedAt: number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -183,6 +219,8 @@ export interface RoomStateResponse {
   problem: Problem | null;
   solves: Solve[];
   leaderboard: LeaderboardEntry[];
+  /** Seconds left in a time-trial round; null in daily mode or once closed. */
+  timeTrialSecondsLeft: number | null;
   /** Set when the fallback picker had to reuse a problem; prompts widening filters. */
   poolExhaustedNotice: string | null;
 }
@@ -206,7 +244,8 @@ export interface BrowseProblemsResponse {
 }
 
 export interface PickRequest {
-  slug: string;
+  /** The full set for the round; length must equal the room's problemsPerRound. */
+  slugs: string[];
   /** Warning codes the curator has explicitly confirmed. Omission is not consent. */
   acknowledge?: WarningCode[];
 }
@@ -217,8 +256,11 @@ export type PickResponse =
   | { ok: false; verdict: PickVerdict };
 
 export interface VerifyNowResponse {
-  solved: boolean;
-  solve: Solve | null;
+  /** Solves newly recorded by this check. */
+  newSolves: Solve[];
+  /** Every solve the caller has in today's set, new or already known. */
+  solves: Solve[];
+  completed: boolean;
   /** True when LeetCode's API failed, so a negative result is inconclusive. */
   degraded: boolean;
 }

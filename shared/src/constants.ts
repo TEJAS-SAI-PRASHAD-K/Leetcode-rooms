@@ -21,6 +21,18 @@ export const ROOM_DEFAULTS = {
   /** Local time by which the curator must pick, else the fallback picker runs. */
   pickDeadlineLocal: "20:00",
   timezone: "UTC",
+  mode: "daily",
+  problemsPerRound: 1,
+  timeTrialMinutes: 90,
+} as const;
+
+/** Guard rails for room settings, enforced server-side. */
+export const LIMITS = {
+  minProblemsPerRound: 1,
+  /** Enough for a themed set without turning a daily habit into a chore. */
+  maxProblemsPerRound: 5,
+  minTimeTrialMinutes: 15,
+  maxTimeTrialMinutes: 360,
 } as const;
 
 /**

@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { Problem } from "@lcr/shared";
-import { curatorForRound, selectFallbackProblem } from "../src/selection.js";
-import type { PastRound } from "../src/repeats.js";
+import {
+  curatorForRound,
+  selectFallbackProblem,
+  selectFallbackSet,
+} from "../src/selection.js";
+import type { PastPick } from "../src/repeats.js";
 
 const TODAY = "2026-10-25";
 
@@ -24,7 +28,7 @@ function p(slug: string, over: Partial<Problem> = {}): Problem {
   };
 }
 
-function past(slug: string, date: string): PastRound {
+function past(slug: string, date: string): PastPick {
   return {
     roundDate: date,
     problemSlug: slug,
@@ -49,7 +53,7 @@ describe("selectFallbackProblem", () => {
     const r = selectFallbackProblem({
       ...base,
       candidates: [p("recent"), p("fresh")],
-      pastRounds: [past("recent", daysAgo(5))],
+      pastPicks: [past("recent", daysAgo(5))],
     });
     expect(r!.problem.slug).toBe("fresh");
     expect(r!.source).toBe("auto_fallback");
@@ -60,7 +64,7 @@ describe("selectFallbackProblem", () => {
     const r = selectFallbackProblem({
       ...base,
       candidates: [p("old")],
-      pastRounds: [past("old", daysAgo(60))],
+      pastPicks: [past("old", daysAgo(60))],
     });
     expect(r!.problem.slug).toBe("old");
     expect(r!.source).toBe("auto_fallback");
@@ -70,7 +74,7 @@ describe("selectFallbackProblem", () => {
     const r = selectFallbackProblem({
       ...base,
       candidates: [p("locked", { paidOnly: true }), p("free")],
-      pastRounds: [],
+      pastPicks: [],
     });
     expect(r!.problem.slug).toBe("free");
   });
@@ -85,7 +89,7 @@ describe("selectFallbackProblem", () => {
         p("b", { difficulty: "Hard", topicTags: ["array"] }),
         p("c", { difficulty: "Hard", topicTags: ["graph"] }),
       ],
-      pastRounds: [],
+      pastPicks: [],
     });
     expect(r!.problem.slug).toBe("c");
   });
@@ -99,7 +103,7 @@ describe("selectFallbackProblem", () => {
         p("easy-graph", { difficulty: "Easy", topicTags: ["graph"] }),
         p("hard-array", { difficulty: "Hard", topicTags: ["array"] }),
       ],
-      pastRounds: [],
+      pastPicks: [],
     });
     // Difficulty is the more meaningful constraint, so it survives.
     expect(r!.problem.slug).toBe("hard-array");
@@ -113,7 +117,7 @@ describe("selectFallbackProblem", () => {
       difficultyFilter: ["Hard"] as never,
       topicFilter: ["graph"] as never,
       candidates: [p("easy-array", { difficulty: "Easy", topicTags: ["array"] })],
-      pastRounds: [],
+      pastPicks: [],
     });
     expect(r!.problem.slug).toBe("easy-array");
     expect(r!.notice).toContain("filters");
@@ -125,7 +129,7 @@ describe("selectFallbackProblem", () => {
     const r = selectFallbackProblem({
       ...base,
       candidates: [p("newer"), p("oldest"), p("middle")],
-      pastRounds: [
+      pastPicks: [
         past("newer", daysAgo(2)),
         past("middle", daysAgo(10)),
         past("oldest", daysAgo(25)),
@@ -138,13 +142,13 @@ describe("selectFallbackProblem", () => {
 
   it("returns null only when there is genuinely nothing to pick", () => {
     expect(
-      selectFallbackProblem({ ...base, candidates: [], pastRounds: [] }),
+      selectFallbackProblem({ ...base, candidates: [], pastPicks: [] }),
     ).toBeNull();
     expect(
       selectFallbackProblem({
         ...base,
         candidates: [p("locked", { paidOnly: true })],
-        pastRounds: [],
+        pastPicks: [],
       }),
     ).toBeNull();
   });
@@ -160,5 +164,66 @@ describe("curatorForRound", () => {
 
   it("handles an empty room", () => {
     expect(curatorForRound({ curatorOrder: [], roundIndex: 4 })).toBeNull();
+  });
+});
+
+describe("selectFallbackSet", () => {
+  it("picks the requested number of distinct problems", () => {
+    const r = selectFallbackSet({
+      ...base,
+      candidates: [p("a"), p("b"), p("c"), p("d")],
+      pastPicks: [],
+      count: 3,
+    });
+    expect(r!.problems).toHaveLength(3);
+    expect(new Set(r!.problems.map((x) => x.slug)).size).toBe(3);
+  });
+
+  it("never repeats a problem within one set", () => {
+    // The cooldown cannot catch this: the other picks are not past rounds yet.
+    const r = selectFallbackSet({
+      ...base,
+      candidates: [p("only-one")],
+      pastPicks: [],
+      count: 3,
+    });
+    expect(r!.problems.map((x) => x.slug)).toEqual(["only-one"]);
+  });
+
+  it("returns a short set rather than nothing when the pool runs dry", () => {
+    // A smaller set still keeps the day alive, which matters more to a habit
+    // than hitting the exact set size.
+    const r = selectFallbackSet({
+      ...base,
+      candidates: [p("a"), p("b")],
+      pastPicks: [],
+      count: 5,
+    });
+    expect(r!.problems).toHaveLength(2);
+  });
+
+  it("still honours the cooldown across the whole set", () => {
+    const r = selectFallbackSet({
+      ...base,
+      candidates: [p("recent"), p("fresh1"), p("fresh2")],
+      pastPicks: [past("recent", daysAgo(3))],
+      count: 2,
+    });
+    expect(r!.problems.map((x) => x.slug)).not.toContain("recent");
+  });
+
+  it("reports the most severe source when the pool is exhausted", () => {
+    const r = selectFallbackSet({
+      ...base,
+      candidates: [p("used")],
+      pastPicks: [past("used", daysAgo(1))],
+      count: 1,
+    });
+    expect(r!.source).toBe("auto_fallback_exhausted");
+    expect(r!.notice).toContain("Widen");
+  });
+
+  it("returns null only when there is nothing at all", () => {
+    expect(selectFallbackSet({ ...base, candidates: [], pastPicks: [], count: 3 })).toBeNull();
   });
 });

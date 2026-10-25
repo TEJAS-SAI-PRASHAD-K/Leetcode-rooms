@@ -1,5 +1,5 @@
 import type { Difficulty, Problem, SelectionSource } from "@lcr/shared";
-import type { PastRound } from "./repeats.js";
+import type { PastPick } from "./repeats.js";
 import { daysBetween } from "./repeats.js";
 
 export interface SelectionResult {
@@ -23,7 +23,7 @@ export interface SelectionResult {
  */
 export function selectFallbackProblem(args: {
   candidates: Problem[];
-  pastRounds: PastRound[];
+  pastPicks: PastPick[];
   today: string;
   repeatCooldownDays: number;
   difficultyFilter: Difficulty[];
@@ -33,7 +33,7 @@ export function selectFallbackProblem(args: {
 }): SelectionResult | null {
   const {
     candidates,
-    pastRounds,
+    pastPicks,
     today,
     repeatCooldownDays,
     difficultyFilter,
@@ -45,7 +45,7 @@ export function selectFallbackProblem(args: {
   if (usable.length === 0) return null;
 
   const blockedSlugs = new Set(
-    pastRounds
+    pastPicks
       .filter((r) => daysBetween(r.roundDate, today) < repeatCooldownDays)
       .map((r) => r.problemSlug),
   );
@@ -86,7 +86,7 @@ export function selectFallbackProblem(args: {
   // Everything available is inside the cooldown. Reuse the least recently used
   // problem and say so loudly.
   const lastUsed = new Map<string, string>();
-  for (const r of pastRounds) {
+  for (const r of pastPicks) {
     // pastRounds is newest first, so the first entry per slug is its latest use.
     if (!lastUsed.has(r.problemSlug)) lastUsed.set(r.problemSlug, r.roundDate);
   }
@@ -119,4 +119,45 @@ export function curatorForRound(args: {
   if (curatorOrder.length === 0) return null;
   const i = ((roundIndex % curatorOrder.length) + curatorOrder.length) % curatorOrder.length;
   return curatorOrder[i]!;
+}
+
+
+/**
+ * Pick a whole set when the curator misses the deadline.
+ *
+ * Chosen one at a time, each pick added to the exclusion list, so the set can
+ * never contain the same problem twice. If the pool runs dry partway the set
+ * comes back short rather than empty — a smaller set still keeps the day alive,
+ * which matters more for a habit than set size does.
+ */
+export function selectFallbackSet(args: {
+  candidates: Problem[];
+  pastPicks: PastPick[];
+  today: string;
+  repeatCooldownDays: number;
+  difficultyFilter: Difficulty[];
+  topicFilter: string[];
+  count: number;
+  random?: () => number;
+}): { problems: Problem[]; source: SelectionSource; notice: string | null } | null {
+  const picked: Problem[] = [];
+  let source: SelectionSource = "auto_fallback";
+  let notice: string | null = null;
+  const taken = new Set<string>();
+
+  for (let i = 0; i < args.count; i++) {
+    const result = selectFallbackProblem({
+      ...args,
+      candidates: args.candidates.filter((p) => !taken.has(p.slug)),
+    });
+    if (!result) break;
+
+    picked.push(result.problem);
+    taken.add(result.problem.slug);
+    // Keep the most severe source and the first explanation worth showing.
+    if (result.source === "auto_fallback_exhausted") source = result.source;
+    if (!notice && result.notice) notice = result.notice;
+  }
+
+  return picked.length > 0 ? { problems: picked, source, notice } : null;
 }

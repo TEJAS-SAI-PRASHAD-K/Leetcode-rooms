@@ -7,11 +7,12 @@ import {
   listPastRounds,
   mapProblem,
   mapRoom,
+  setRoundProblems,
   upsertProblems,
 } from "./db.js";
-import { fetchProblemPage, findSolveInWindow, LeetCodeError } from "./leetcode.js";
+import { fetchProblemPage, fetchRecentAccepted, LeetCodeError } from "./leetcode.js";
 import { ensureTodayRound } from "./rounds.js";
-import { selectFallbackProblem } from "./selection.js";
+import { selectFallbackSet } from "./selection.js";
 import { isPastPickDeadline, localDate } from "./time.js";
 
 /**
@@ -74,19 +75,19 @@ async function runVerificationSweep(env: Env, now: number) {
   // problem set. The work naturally shrinks as the day goes on.
   const { results } = await env.DB.prepare(
     `SELECT r.id AS round_id, u.id AS user_id, u.leetcode_username AS username,
-            r.problem_slug AS slug, r.difficulty, r.window_start, r.window_end
+            p.slug, p.difficulty, r.window_start, r.window_end
        FROM rounds r
-       JOIN room_members m ON m.room_id = r.room_id
-       JOIN users u        ON u.id = m.user_id
-      WHERE r.problem_slug IS NOT NULL
-        AND ?1 BETWEEN r.window_start AND r.window_end
+       JOIN round_problems p ON p.round_id = r.id
+       JOIN room_members m   ON m.room_id = r.room_id
+       JOIN users u          ON u.id = m.user_id
+      WHERE ?1 BETWEEN r.window_start AND r.window_end
         AND u.leetcode_username IS NOT NULL
         AND u.verified_at IS NOT NULL
         AND NOT EXISTS (
               SELECT 1 FROM solves s
-               WHERE s.round_id = r.id AND s.user_id = u.id
+               WHERE s.round_id = r.id AND s.user_id = u.id AND s.slug = p.slug
             )
-      ORDER BY r.room_id, u.id`,
+      ORDER BY r.room_id, u.id, p.position`,
   )
     .bind(now)
     .all<{
@@ -137,19 +138,34 @@ async function runVerificationSweep(env: Env, now: number) {
 
   let verified = 0;
   for (const [username, checks] of byUser) {
+    // One feed fetch covers every outstanding problem for this user, which
+    // matters under the 50-subrequest ceiling now that a round holds a set.
+    let feed: Awaited<ReturnType<typeof fetchRecentAccepted>>;
+    try {
+      feed = await fetchRecentAccepted(username);
+    } catch (err) {
+      if (err instanceof LeetCodeError) {
+        console.warn(`verify failed for ${username}: ${err.message}`);
+        continue;
+      }
+      throw err;
+    }
+
     for (const check of checks) {
       try {
-        const solvedAt = await findSolveInWindow(
-          username,
-          check.slug,
-          check.windowStart,
-          check.windowEnd,
+        const hit = feed.find(
+          (s) =>
+            s.titleSlug === check.slug &&
+            s.timestamp >= check.windowStart &&
+            s.timestamp <= check.windowEnd,
         );
+        const solvedAt = hit ? hit.timestamp : null;
         if (solvedAt === null) continue;
 
         const solve = await insertSolve(env, {
           roundId: check.roundId,
           userId: check.userId,
+          slug: check.slug,
           solvedAt,
           difficulty: check.difficulty,
           source: "verified_poll",
@@ -196,7 +212,7 @@ async function runPickFallback(env: Env, now: number): Promise<number> {
     }
 
     const round = await ensureTodayRound(env, room, now);
-    if (round.problemSlug) continue; // curator already picked
+    if (round.problems.length > 0) continue; // curator already picked
 
     // Pull a bounded candidate pool from the cache rather than the whole
     // catalog, keeping the query cheap. Ordered by acceptance rate so the
@@ -207,31 +223,28 @@ async function runPickFallback(env: Env, now: number): Promise<number> {
 
     if (pool.length === 0) continue;
 
-    const selection = selectFallbackProblem({
+    const selection = selectFallbackSet({
       candidates: pool.map(mapProblem),
-      pastRounds: await listPastRounds(env, room.id),
+      pastPicks: await listPastRounds(env, room.id),
       today,
       repeatCooldownDays: room.repeatCooldownDays,
       difficultyFilter: room.difficultyFilter,
       topicFilter: room.topicFilter,
+      count: room.problemsPerRound,
     });
     if (!selection) continue;
 
-    await env.DB.prepare(
-      `UPDATE rounds
-          SET problem_slug = ?, problem_title = ?, difficulty = ?, topic_tags = ?,
-              selection_source = ?
-        WHERE id = ? AND problem_slug IS NULL`,
-    )
-      .bind(
-        selection.problem.slug,
-        selection.problem.title,
-        selection.problem.difficulty,
-        JSON.stringify(selection.problem.topicTags),
-        selection.source,
-        round.id,
+    await setRoundProblems(env, round.id, selection.problems, selection.source, null, []);
+
+    // A time trial opens when the set is published, so a fallback set starts
+    // the clock now rather than inheriting the whole day.
+    if (room.mode === "time_trial") {
+      await env.DB.prepare(
+        `UPDATE rounds SET window_start = ?, window_end = ? WHERE id = ?`,
       )
-      .run();
+        .bind(now, now + room.timeTrialMinutes * 60, round.id)
+        .run();
+    }
 
     if (selection.notice) console.warn(`room ${room.code}: ${selection.notice}`);
     filled++;

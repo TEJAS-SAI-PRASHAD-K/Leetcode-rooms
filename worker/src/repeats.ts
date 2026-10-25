@@ -8,11 +8,14 @@ import type {
 } from "@lcr/shared";
 
 /**
- * A past round, reduced to just what repeat detection needs. `topicTags` is the
- * snapshot taken at pick time, so these checks stay correct even after the
- * problem catalog is refreshed.
+ * One problem the room has used before, with the round it belonged to.
+ *
+ * A round can now hold several problems, so repeat detection works at problem
+ * granularity while the topic and difficulty windows are measured in rounds.
+ * `topicTags` is the snapshot taken at pick time, so these checks stay correct
+ * even after the problem catalog is refreshed.
  */
-export interface PastRound {
+export interface PastPick {
   roundDate: string; // YYYY-MM-DD, room-local
   problemSlug: string;
   problemTitle: string;
@@ -41,6 +44,23 @@ function plural(n: number, word: string): string {
   return `${n} ${word}${n === 1 ? "" : "s"}`;
 }
 
+function ordinal(n: number): string {
+  const s = ["th", "st", "nd", "rd"];
+  const v = n % 100;
+  return n + (s[(v - 20) % 10] ?? s[v] ?? s[0]!);
+}
+
+/** The picks belonging to the most recent `rounds` distinct round dates. */
+function recentWindow(picks: PastPick[], rounds: number): PastPick[] {
+  const dates: string[] = [];
+  for (const p of picks) {
+    if (!dates.includes(p.roundDate)) dates.push(p.roundDate);
+    if (dates.length > rounds) break;
+  }
+  const keep = new Set(dates.slice(0, rounds));
+  return picks.filter((p) => keep.has(p.roundDate));
+}
+
 /**
  * Decide whether a candidate problem may be picked for a room today.
  *
@@ -58,14 +78,20 @@ export function evaluatePick(args: {
     | "difficultyRunThreshold"
   >;
   candidate: Problem;
-  /** This room's past rounds, newest first. */
-  pastRounds: PastRound[];
+  /** This room's past picks, newest first. */
+  pastPicks: PastPick[];
   /** Today's room-local date, YYYY-MM-DD. */
   today: string;
   /** Curator about to pick, for the per-curator pattern checks. */
   curatorId?: string | null;
+  /**
+   * Problems already chosen for this same round. A set must not contain the
+   * same problem twice, which the cooldown alone would not catch because those
+   * picks are not yet saved as past rounds.
+   */
+  alreadyInSet?: string[];
 }): PickVerdict {
-  const { settings, candidate, pastRounds, today, curatorId } = args;
+  const { settings, candidate, pastPicks, today, curatorId, alreadyInSet } = args;
   const warnings: PickWarning[] = [];
 
   // --- Premium problems would lock out anyone without a subscription. -------
@@ -79,9 +105,21 @@ export function evaluatePick(args: {
     };
   }
 
+  // --- Already in today's set ---------------------------------------------
+  if (alreadyInSet?.includes(candidate.slug)) {
+    return {
+      blocked: {
+        code: "repeat_recent",
+        message: `"${candidate.title}" is already in today's set.`,
+        daysAgo: 0,
+      },
+      warnings: [],
+    };
+  }
+
   // --- Exact repeat --------------------------------------------------------
-  // pastRounds is newest first, so the first match is the most recent use.
-  const previous = pastRounds.find((r) => r.problemSlug === candidate.slug);
+  // pastPicks is newest first, so the first match is the most recent use.
+  const previous = pastPicks.find((r) => r.problemSlug === candidate.slug);
   if (previous) {
     const daysAgo = daysBetween(previous.roundDate, today);
     const by = previous.curatorName ?? "someone";
@@ -114,22 +152,24 @@ export function evaluatePick(args: {
 
   // --- Repetitive topic / difficulty --------------------------------------
   // The more damaging kind of repetition: not the same problem, but the same
-  // *kind* of problem over and over.
-  const window = pastRounds.slice(0, Math.max(0, settings.topicWarnWindow));
+  // *kind* of problem over and over. Counted over the most recent N rounds,
+  // which works whether a round holds one problem or five.
+  const window = recentWindow(pastPicks, Math.max(0, settings.topicWarnWindow));
+  const roundsInWindow = new Set(window.map((p) => p.roundDate)).size;
 
   const topicHit = concentratedTag(window, candidate, settings.topicWarnThreshold);
   if (topicHit) {
     warnings.push({
       code: "topic_concentration",
-      message: `This room has had ${plural(topicHit.count, `${humanizeTag(topicHit.tag)} problem`)} in the last ${plural(window.length, "round")}.`,
+      message: `This room has had ${plural(topicHit.count, `${humanizeTag(topicHit.tag)} problem`)} in the last ${plural(roundsInWindow, "round")}.`,
     });
   }
 
-  const run = leadingDifficultyRun(window, candidate.difficulty);
-  if (run >= settings.difficultyRunThreshold) {
+  const sameDifficulty = window.filter((p) => p.difficulty === candidate.difficulty).length;
+  if (sameDifficulty >= settings.difficultyRunThreshold) {
     warnings.push({
       code: "difficulty_run",
-      message: `That would be ${run + 1} ${candidate.difficulty} problems in a row.`,
+      message: `That would be the ${ordinal(sameDifficulty + 1)} ${candidate.difficulty} problem in the last ${plural(roundsInWindow, "round")}.`,
     });
   }
 
@@ -137,13 +177,16 @@ export function evaluatePick(args: {
   // Catches one person repeatedly defaulting to their comfort zone, which the
   // room-wide checks miss when curators rotate.
   if (curatorId) {
-    const mine = pastRounds.filter((r) => r.curatorId === curatorId).slice(0, window.length || 7);
+    const mine = recentWindow(
+      pastPicks.filter((r) => r.curatorId === curatorId),
+      Math.max(1, settings.topicWarnWindow),
+    );
 
-    const myRun = leadingDifficultyRun(mine, candidate.difficulty);
-    if (myRun >= settings.difficultyRunThreshold) {
+    const myDifficulty = mine.filter((p) => p.difficulty === candidate.difficulty).length;
+    if (myDifficulty >= settings.difficultyRunThreshold) {
       warnings.push({
         code: "curator_difficulty_pattern",
-        message: `You have picked ${candidate.difficulty} on your last ${plural(myRun, "turn")}.`,
+        message: `${plural(myDifficulty, "of your recent pick")} ${myDifficulty === 1 ? "was" : "were"} ${candidate.difficulty}.`,
       });
     }
 
@@ -159,31 +202,21 @@ export function evaluatePick(args: {
   return { blocked: null, warnings };
 }
 
-/** The candidate tag most over-represented in `rounds`, if it hits `threshold`. */
+/** The candidate tag most over-represented in `picks`, if it hits `threshold`. */
 function concentratedTag(
-  rounds: PastRound[],
+  picks: PastPick[],
   candidate: Problem,
   threshold: number,
 ): { tag: string; count: number } | null {
   let best: { tag: string; count: number } | null = null;
 
   for (const tag of candidate.topicTags) {
-    const count = rounds.filter((r) => r.topicTags.includes(tag)).length;
+    const count = picks.filter((r) => r.topicTags.includes(tag)).length;
     if (count >= threshold && (!best || count > best.count)) {
       best = { tag, count };
     }
   }
   return best;
-}
-
-/** How many of the most recent consecutive rounds share `difficulty`. */
-function leadingDifficultyRun(rounds: PastRound[], difficulty: Difficulty): number {
-  let run = 0;
-  for (const r of rounds) {
-    if (r.difficulty !== difficulty) break;
-    run++;
-  }
-  return run;
 }
 
 /**

@@ -4,13 +4,15 @@ import type {
   Problem,
   Room,
   Round,
+  RoomMode,
+  RoundProblem,
   SelectionSource,
   Solve,
   SolveSource,
   WarningCode,
 } from "@lcr/shared";
 import { DIFFICULTY_POINTS, FIRST_SOLVER_BONUS } from "@lcr/shared";
-import type { PastRound } from "./repeats.js";
+import type { PastPick } from "./repeats.js";
 
 export interface Env {
   DB: D1Database;
@@ -46,6 +48,9 @@ interface RoomRow {
   topic_warn_window: number;
   topic_warn_threshold: number;
   difficulty_run_threshold: number;
+  mode: string;
+  problems_per_round: number;
+  time_trial_minutes: number;
   created_at: number;
 }
 
@@ -64,6 +69,9 @@ export function mapRoom(r: RoomRow): Room {
     topicWarnWindow: r.topic_warn_window,
     topicWarnThreshold: r.topic_warn_threshold,
     difficultyRunThreshold: r.difficulty_run_threshold,
+    mode: (r.mode as RoomMode) ?? "daily",
+    problemsPerRound: r.problems_per_round ?? 1,
+    timeTrialMinutes: r.time_trial_minutes ?? 90,
     createdAt: r.created_at,
   };
 }
@@ -73,31 +81,56 @@ interface RoundRow {
   room_id: string;
   round_date: string;
   curator_id: string | null;
-  problem_slug: string | null;
-  problem_title: string | null;
-  difficulty: string | null;
-  topic_tags: string;
   selection_source: string | null;
   window_start: number;
   window_end: number;
   acknowledged: string;
 }
 
-export function mapRound(r: RoundRow): Round {
+interface RoundProblemRow {
+  slug: string;
+  title: string;
+  difficulty: string;
+  topic_tags: string;
+  position: number;
+}
+
+export function mapRoundProblem(r: RoundProblemRow): RoundProblem {
+  return {
+    slug: r.slug,
+    title: r.title,
+    difficulty: r.difficulty as Difficulty,
+    topicTags: parseJsonArray<string>(r.topic_tags),
+    position: r.position,
+  };
+}
+
+export function mapRound(r: RoundRow, problems: RoundProblem[] = []): Round {
   return {
     id: r.id,
     roomId: r.room_id,
     roundDate: r.round_date,
     curatorId: r.curator_id,
-    problemSlug: r.problem_slug,
-    problemTitle: r.problem_title,
-    difficulty: (r.difficulty as Difficulty | null) ?? null,
-    topicTags: parseJsonArray<string>(r.topic_tags),
+    problems,
     selectionSource: (r.selection_source as SelectionSource | null) ?? null,
     windowStart: r.window_start,
     windowEnd: r.window_end,
     acknowledged: parseJsonArray<WarningCode>(r.acknowledged),
   };
+}
+
+/** The problem set for a round, in pick order. */
+export async function listRoundProblems(
+  env: Env,
+  roundId: string,
+): Promise<RoundProblem[]> {
+  const { results } = await env.DB.prepare(
+    `SELECT slug, title, difficulty, topic_tags, position
+       FROM round_problems WHERE round_id = ? ORDER BY position ASC`,
+  )
+    .bind(roundId)
+    .all<RoundProblemRow>();
+  return results.map(mapRoundProblem);
 }
 
 interface ProblemRow {
@@ -196,26 +229,43 @@ export async function getRound(
   )
     .bind(roomId, roundDate)
     .first<RoundRow>();
-  return row ? mapRound(row) : null;
+  return row ? mapRound(row, await listRoundProblems(env, row.id)) : null;
 }
 
 export async function getRoundById(env: Env, roundId: string): Promise<Round | null> {
   const row = await env.DB.prepare(`SELECT * FROM rounds WHERE id = ?`)
     .bind(roundId)
     .first<RoundRow>();
-  return row ? mapRound(row) : null;
+  return row ? mapRound(row, await listRoundProblems(env, row.id)) : null;
 }
 
 /** Room round dates, newest first. Streaks are defined against these. */
 export async function listRoundDates(env: Env, roomId: string): Promise<string[]> {
   const { results } = await env.DB.prepare(
-    `SELECT round_date FROM rounds
-      WHERE room_id = ? AND problem_slug IS NOT NULL
-      ORDER BY round_date DESC`,
+    `SELECT r.round_date FROM rounds r
+      WHERE r.room_id = ?
+        AND EXISTS (SELECT 1 FROM round_problems p WHERE p.round_id = r.id)
+      ORDER BY r.round_date DESC`,
   )
     .bind(roomId)
     .all<{ round_date: string }>();
   return results.map((r) => r.round_date);
+}
+
+/** Round date -> how many problems that round held. Drives "completed". */
+export async function listRoundSizes(
+  env: Env,
+  roomId: string,
+): Promise<Map<string, number>> {
+  const { results } = await env.DB.prepare(
+    `SELECT r.round_date, COUNT(p.slug) AS n
+       FROM rounds r JOIN round_problems p ON p.round_id = r.id
+      WHERE r.room_id = ?
+      GROUP BY r.round_date`,
+  )
+    .bind(roomId)
+    .all<{ round_date: string; n: number }>();
+  return new Map(results.map((r) => [r.round_date, r.n]));
 }
 
 /**
@@ -226,14 +276,16 @@ export async function listPastRounds(
   env: Env,
   roomId: string,
   limit = 400,
-): Promise<PastRound[]> {
+): Promise<PastPick[]> {
   const { results } = await env.DB.prepare(
-    `SELECT r.round_date, r.problem_slug, r.problem_title, r.difficulty,
-            r.topic_tags, r.curator_id, u.display_name AS curator_name
+    `SELECT r.round_date, p.slug AS problem_slug, p.title AS problem_title,
+            p.difficulty, p.topic_tags, r.curator_id,
+            u.display_name AS curator_name
        FROM rounds r
+       JOIN round_problems p ON p.round_id = r.id
        LEFT JOIN users u ON u.id = r.curator_id
-      WHERE r.room_id = ? AND r.problem_slug IS NOT NULL
-      ORDER BY r.round_date DESC
+      WHERE r.room_id = ?
+      ORDER BY r.round_date DESC, p.position ASC
       LIMIT ?`,
   )
     .bind(roomId, limit)
@@ -260,12 +312,13 @@ export async function listPastRounds(
 
 export async function listSolves(env: Env, roundId: string): Promise<Solve[]> {
   const { results } = await env.DB.prepare(
-    `SELECT * FROM solves WHERE round_id = ? ORDER BY solve_order ASC`,
+    `SELECT * FROM solves WHERE round_id = ? ORDER BY solved_at ASC`,
   )
     .bind(roundId)
     .all<{
       round_id: string;
       user_id: string;
+      slug: string;
       solved_at: number;
       points: number;
       solve_order: number;
@@ -275,6 +328,7 @@ export async function listSolves(env: Env, roundId: string): Promise<Solve[]> {
   return results.map((r) => ({
     roundId: r.round_id,
     userId: r.user_id,
+    slug: r.slug,
     solvedAt: r.solved_at,
     points: r.points,
     solveOrder: r.solve_order,
@@ -286,20 +340,30 @@ export async function listSolves(env: Env, roundId: string): Promise<Solve[]> {
 export async function listRoomSolves(
   env: Env,
   roomId: string,
-): Promise<Array<{ userId: string; roundDate: string; points: number }>> {
+): Promise<
+  Array<{ userId: string; roundDate: string; slug: string; points: number; solvedAt: number }>
+> {
   const { results } = await env.DB.prepare(
-    `SELECT s.user_id, r.round_date, s.points
+    `SELECT s.user_id, r.round_date, s.slug, s.points, s.solved_at
        FROM solves s
        JOIN rounds r ON r.id = s.round_id
       WHERE r.room_id = ?`,
   )
     .bind(roomId)
-    .all<{ user_id: string; round_date: string; points: number }>();
+    .all<{
+      user_id: string;
+      round_date: string;
+      slug: string;
+      points: number;
+      solved_at: number;
+    }>();
 
   return results.map((r) => ({
     userId: r.user_id,
     roundDate: r.round_date,
+    slug: r.slug,
     points: r.points,
+    solvedAt: r.solved_at,
   }));
 }
 
@@ -352,21 +416,23 @@ export async function upsertProblems(env: Env, problems: Problem[], now: number)
 }
 
 /**
- * Record a verified solve.
+ * Record a verified solve for one problem in a round.
  *
- * Insert-once on (round_id, user_id) is what makes repeated polling safe: the
- * cron sweep and the post-submit fast path can both race to report the same
+ * Insert-once on (round_id, user_id, slug) is what makes repeated polling safe:
+ * the cron sweep and the post-submit fast path can both race to report the same
  * solve and the first one wins. Returns null when a row already existed, so
  * callers can tell "newly verified" from "already known".
  *
- * Points and solve_order are derived inside the statement rather than read-then-
- * written, so two concurrent verifications cannot both claim first place.
+ * Points and solve_order are derived inside the statement rather than
+ * read-then-written, so two concurrent verifications cannot both claim first
+ * place on the same problem.
  */
 export async function insertSolve(
   env: Env,
   args: {
     roundId: string;
     userId: string;
+    slug: string;
     solvedAt: number;
     difficulty: Difficulty;
     source: SolveSource;
@@ -374,17 +440,20 @@ export async function insertSolve(
   },
 ): Promise<Solve | null> {
   const result = await env.DB.prepare(
-    `INSERT INTO solves (round_id, user_id, solved_at, points, solve_order, source, created_at)
-     SELECT ?1, ?2, ?3,
-            ?4 + CASE WHEN (SELECT COUNT(*) FROM solves WHERE round_id = ?1) = 0
-                      THEN ?5 ELSE 0 END,
-            1 + (SELECT COUNT(*) FROM solves WHERE round_id = ?1),
-            ?6, ?7
-     WHERE NOT EXISTS (SELECT 1 FROM solves WHERE round_id = ?1 AND user_id = ?2)`,
+    `INSERT INTO solves (round_id, user_id, slug, solved_at, points, solve_order, source, created_at)
+     SELECT ?1, ?2, ?3, ?4,
+            ?5 + CASE WHEN (SELECT COUNT(*) FROM solves WHERE round_id = ?1 AND slug = ?3) = 0
+                      THEN ?6 ELSE 0 END,
+            1 + (SELECT COUNT(*) FROM solves WHERE round_id = ?1 AND slug = ?3),
+            ?7, ?8
+     WHERE NOT EXISTS (
+       SELECT 1 FROM solves WHERE round_id = ?1 AND user_id = ?2 AND slug = ?3
+     )`,
   )
     .bind(
       args.roundId,
       args.userId,
+      args.slug,
       args.solvedAt,
       DIFFICULTY_POINTS[args.difficulty],
       FIRST_SOLVER_BONUS,
@@ -396,12 +465,13 @@ export async function insertSolve(
   if (!result.meta.changes) return null;
 
   const row = await env.DB.prepare(
-    `SELECT * FROM solves WHERE round_id = ? AND user_id = ?`,
+    `SELECT * FROM solves WHERE round_id = ? AND user_id = ? AND slug = ?`,
   )
-    .bind(args.roundId, args.userId)
+    .bind(args.roundId, args.userId, args.slug)
     .first<{
       round_id: string;
       user_id: string;
+      slug: string;
       solved_at: number;
       points: number;
       solve_order: number;
@@ -412,10 +482,46 @@ export async function insertSolve(
     ? {
         roundId: row.round_id,
         userId: row.user_id,
+        slug: row.slug,
         solvedAt: row.solved_at,
         points: row.points,
         solveOrder: row.solve_order,
         source: row.source as SolveSource,
       }
     : null;
+}
+
+/** Replace a round's problem set in one shot. */
+export async function setRoundProblems(
+  env: Env,
+  roundId: string,
+  problems: Problem[],
+  selectionSource: string,
+  curatorId: string | null,
+  acknowledged: string[],
+): Promise<void> {
+  const statements = [
+    env.DB.prepare(`DELETE FROM round_problems WHERE round_id = ?`).bind(roundId),
+    ...problems.map((p, i) =>
+      env.DB.prepare(
+        `INSERT INTO round_problems (round_id, slug, title, difficulty, topic_tags, position)
+         VALUES (?,?,?,?,?,?)`,
+      ).bind(roundId, p.slug, p.title, p.difficulty, JSON.stringify(p.topicTags), i),
+    ),
+    env.DB.prepare(
+      `UPDATE rounds SET selection_source = ?, curator_id = COALESCE(?, curator_id),
+              acknowledged = ? WHERE id = ?`,
+    ).bind(selectionSource, curatorId, JSON.stringify(acknowledged), roundId),
+  ];
+  await env.DB.batch(statements);
+}
+
+/** Does this round already have a set? */
+export async function roundHasProblems(env: Env, roundId: string): Promise<boolean> {
+  const row = await env.DB.prepare(
+    `SELECT 1 AS ok FROM round_problems WHERE round_id = ? LIMIT 1`,
+  )
+    .bind(roundId)
+    .first<{ ok: number }>();
+  return row !== null;
 }
