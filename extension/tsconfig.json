@@ -6,6 +6,7 @@
     "jsx": "react-jsx",
     "types": ["chrome", "vite/client", "node"],
     "noEmit": true,
+    "resolveJsonModule": true,
     "composite": false,
     "declaration": false,
     "declarationMap": false

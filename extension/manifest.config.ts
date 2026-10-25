@@ -1,4 +1,7 @@
 import { defineManifest } from "@crxjs/vite-plugin";
+// Single source of truth: bump with `npm run bump` rather than editing here,
+// so the published extension never claims a version the repo does not have.
+import pkg from "./package.json" with { type: "json" };
 
 /**
  * The Worker the extension talks to. Set VITE_API_BASE when building for a
@@ -16,7 +19,7 @@ const apiOrigin = new URL(API_BASE).origin + "/*";
 export default defineManifest({
   manifest_version: 3,
   name: "LeetCode Rooms",
-  version: "0.1.0",
+  version: pkg.version,
   description:
     "Practise LeetCode daily with friends: a rotating curator picks the problem, solves are verified automatically, and streaks keep everyone showing up.",
   // Opening the popup is the only action; no tabs/history/cookies permissions,
