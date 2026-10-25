@@ -3,6 +3,16 @@
 Notable changes per release. Versions follow [semver](https://semver.org/);
 `npm run bump patch|minor|major` updates every package at once.
 
+## 0.3.1
+
+- **Reinstalling no longer locks you out.** A fresh install mints a new
+  identity, so linking failed with "already linked to another member" and there
+  was no way back to your own rooms. Detection already proves the browser is
+  signed in as that handle — the same proof that created the link — so an
+  untouched install now takes over the existing account, keeping its rooms,
+  streaks and history. An install that already has rooms or a different handle
+  cannot, and the refusal says which.
+
 ## 0.3.0
 
 **Picker**

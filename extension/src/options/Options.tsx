@@ -148,7 +148,9 @@ export function Options() {
                 if (!res.ok) throw new Error(res.error ?? "Detection failed.");
                 // Best-effort badge refresh; failure here must not fail linking.
                 void chrome.runtime.sendMessage({ type: "badge:refresh" }).catch(() => {});
-                return `Linked as ${res.linked}.`;
+                return res.reclaimed
+                  ? `Welcome back — reclaimed ${res.linked}, with your rooms and streaks intact.`
+                  : `Linked as ${res.linked}.`;
               } finally {
                 setDetecting(false);
               }

@@ -5,6 +5,8 @@ import { readStore, writeStore } from "./storage.js";
 export interface LinkOutcome {
   ok: boolean;
   linked?: string;
+  /** This install took over an existing account rather than linking a new one. */
+  reclaimed?: boolean;
   error?: string;
 }
 
@@ -44,7 +46,30 @@ export async function applyDetection(
   if (fresh) return { ok: true, linked: username };
 
   try {
-    await api.linkHandle(username);
+    const res = await api.linkHandle(username);
+
+    if (res.reclaimed) {
+      /*
+       * This install took over an account that already held the handle — a
+       * reinstall getting its rooms back. The bearer token now belongs to that
+       * account, so the stored user id has to follow it, otherwise "is this me"
+       * checks on the leaderboard would silently stop matching.
+       *
+       * activeRoomId is cleared so the popup re-picks from the rooms the
+       * reclaimed account is actually in, rather than a stale id from before.
+       */
+      const current = await readStore();
+      await writeStore({
+        identity: current.identity
+          ? { ...current.identity, userId: res.userId }
+          : current.identity,
+        activeRoomId: undefined,
+        leetcodeUsername: username,
+        handleCheckedAt: Date.now(),
+      });
+      return { ok: true, linked: username, reclaimed: true };
+    }
+
     await writeStore({ leetcodeUsername: username, handleCheckedAt: Date.now() });
     return { ok: true, linked: username };
   } catch (err) {

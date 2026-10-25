@@ -1,7 +1,7 @@
 {
   "name": "leetcode-rooms",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.3.1",
   "type": "module",
   "description": "Daily LeetCode practice rooms for small groups: a rotating curator picks the day's problem, solves are verified server-side, and streaks keep everyone showing up.",
   "workspaces": [

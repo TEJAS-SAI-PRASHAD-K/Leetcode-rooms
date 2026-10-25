@@ -196,6 +196,14 @@ export interface VerifyHandleResponse {
   verifiedAt: number;
   /** False when the handle exists locally but LeetCode has no such profile. */
   profileExists: boolean;
+  /**
+   * True when this install took over an existing account that already held the
+   * handle — a reinstall reclaiming its rooms, streaks and history rather than
+   * starting over.
+   */
+  reclaimed: boolean;
+  /** The account this install now is. Differs from the caller's id on reclaim. */
+  userId: string;
 }
 
 export interface CreateRoomRequest {
