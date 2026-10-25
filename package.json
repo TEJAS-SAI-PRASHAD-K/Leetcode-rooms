@@ -1,0 +1,28 @@
+{
+  "name": "leetcode-rooms",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Daily LeetCode practice rooms for small groups: a rotating curator picks the day's problem, solves are verified server-side, and streaks keep everyone showing up.",
+  "workspaces": [
+    "shared",
+    "worker",
+    "extension"
+  ],
+  "scripts": {
+    "dev:worker": "npm run dev --workspace worker",
+    "dev:extension": "npm run dev --workspace extension",
+    "build": "npm run build --workspace shared && npm run build --workspace extension",
+    "test": "npm run test --workspace worker",
+    "typecheck": "tsc -b shared worker extension",
+    "check:api": "node --experimental-strip-types scripts/check-leetcode-api.ts",
+    "build:catalog": "node --experimental-strip-types scripts/build-catalog-sql.ts"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vite": "^7.3.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

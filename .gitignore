@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.wrangler/
+*.tsbuildinfo
+.dev.vars
+.DS_Store
+extension/dist/
+worker/.wrangler/

@@ -1,0 +1,20 @@
+name = "leetcode-rooms"
+main = "src/index.ts"
+compatibility_date = "2024-12-18"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "leetcode-rooms"
+# Replace with the id printed by: wrangler d1 create leetcode-rooms
+database_id = "dd764cd1-8604-4693-abf0-7088c7bbe861"
+migrations_dir = "migrations"
+
+# One trigger is enough; Workers Free allows 5 per account.
+# Every 10 minutes: verification sweep + pick-deadline fallback + catalog refresh.
+[triggers]
+crons = ["*/10 * * * *"]
+
+# Deployed default. `wrangler dev` overrides this to "development" via
+# .dev.vars, so the dev-only endpoints are never exposed on a deployed Worker.
+[vars]
+ENVIRONMENT = "production"
